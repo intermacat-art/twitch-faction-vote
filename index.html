@@ -92,9 +92,18 @@
   }
   .faction .pct { font-size: 14px; opacity: 0.7; margin-bottom: 14px; }
   .faction .voters {
-    flex: 1; overflow-y: auto; font-size: 13px;
+    flex: 1 1 0; min-height: 0; overflow-y: auto; font-size: 13px;
     background: #0e0e10; border-radius: 4px; padding: 8px;
   }
+  .faction.collapsed .voters { display: none; }
+  .faction.collapsed { flex: 0; }
+  .faction .collapse-btn {
+    position: absolute; top: 12px; right: 12px;
+    background: rgba(255,255,255,0.08); border: 1px solid #3a3a3d;
+    color: #efeff1; width: 32px; height: 32px; border-radius: 4px;
+    cursor: pointer; padding: 0; font-size: 16px; line-height: 1;
+  }
+  .faction .collapse-btn:hover { background: rgba(255,255,255,0.18); }
   .voter {
     padding: 3px 6px; border-bottom: 1px solid #1a1a1d;
     animation: drop 0.45s ease-out;
@@ -386,20 +395,25 @@ function handleIrcLine(line) {
     logFeed(`${display}: ${message}`, false);
     return;
   }
-  if (userVotes.has(userId)) {
-    logFeed(`${display}: ${message}  (已投過)`, false);
-    return;
-  }
 
   const lower = message.toLowerCase();
   for (let i = 0; i < factions.length; i++) {
     if (matchKeyword(lower, factions[i].keyword.toLowerCase())) {
+      const prev = userVotes.get(userId);
+      if (prev === i) {
+        logFeed(`${display}: ${message}  (已在 ${factions[i].name})`, false);
+        return;
+      }
+      if (prev !== undefined) {
+        factions[prev].count--;
+        factions[prev].voters = factions[prev].voters.filter(v => v.id !== userId);
+      }
       userVotes.set(userId, i);
       factions[i].count++;
-      factions[i].voters.unshift(display);
+      factions[i].voters.unshift({ id: userId, name: display });
       if (factions[i].voters.length > 200) factions[i].voters.pop();
       renderBoard();
-      logFeed(`${display} -> ${factions[i].name}`, true);
+      logFeed(`${display} ${prev !== undefined ? '換到' : '→'} ${factions[i].name}`, true);
       return;
     }
   }
@@ -458,22 +472,29 @@ function renderBoard() {
   const total = factions.reduce((s, f) => s + f.count, 0);
   const max = Math.max(...factions.map(f => f.count));
 
-  board.innerHTML = factions.map(f => {
+  board.innerHTML = factions.map((f, idx) => {
     const pct = total > 0 ? (f.count / total * 100).toFixed(1) : '0.0';
     const isLeader = max > 0 && f.count === max;
+    const collapsed = f.collapsed;
     return `
-      <div class="faction ${isLeader ? 'leader' : ''}" style="--col: ${f.color}">
+      <div class="faction ${isLeader ? 'leader' : ''} ${collapsed ? 'collapsed' : ''}" style="--col: ${f.color}">
         ${isLeader ? '<div class="leader-tag">LEADING</div>' : ''}
+        <button class="collapse-btn" onclick="toggleCollapse(${idx})" title="${collapsed ? '展開' : '收合'}名單">${collapsed ? '＋' : '－'}</button>
         <h2>${esc(f.name)}</h2>
         <div class="keyword">關鍵詞：${esc(f.keyword)}</div>
         <div class="count">${f.count}</div>
         <div class="pct">${pct}%</div>
         <div class="voters">
-          ${f.voters.slice(0, 80).map(v => `<div class="voter">${esc(v)}</div>`).join('')}
+          ${f.voters.slice(0, 80).map(v => `<div class="voter">${esc(v.name)}</div>`).join('')}
         </div>
       </div>
     `;
   }).join('');
+}
+
+function toggleCollapse(i) {
+  factions[i].collapsed = !factions[i].collapsed;
+  renderBoard();
 }
 
 function esc(s) {
@@ -515,7 +536,7 @@ function reset() {
 function exportCSV() {
   const rows = [['faction', 'voter']];
   factions.forEach(f => {
-    f.voters.forEach(v => rows.push([f.name, v]));
+    f.voters.forEach(v => rows.push([f.name, v.name]));
   });
   const csv = '﻿' + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
@@ -565,7 +586,7 @@ function showResults() {
         <div class="pod-pct">${pct}%　關鍵詞 ${esc(f.keyword)}</div>
         <div class="pod-voters">
           ${f.voters.length === 0 ? '<div class="voter" style="opacity:0.4;">（無投票者）</div>'
-            : f.voters.slice(0, 50).map(v => `<div class="voter">${esc(v)}</div>`).join('')}
+            : f.voters.slice(0, 50).map(v => `<div class="voter">${esc(v.name)}</div>`).join('')}
           ${f.voters.length > 50 ? `<div class="voter" style="opacity:0.5;">...還有 ${f.voters.length - 50} 人</div>` : ''}
         </div>
       </div>
