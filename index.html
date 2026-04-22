@@ -126,7 +126,10 @@
 
   <div class="hint" style="margin-top:8px;">
     規則：每個觀眾只能投一次，第一條符合任何關鍵詞的訊息決定派系。<br>
-    英文/數字關鍵詞會做 word-boundary 比對（"A" 不會被 "AKB" 觸發）；中文用包含比對。
+    比對規則：<br>
+    &nbsp;・單一英數字元（如 <code>A</code>）→ 獨立詞比對，不會被 <code>ABC</code> 觸發<br>
+    &nbsp;・其他（如 <code>eso</code>、<code>親親幫</code>）→ 包含比對，<code>esoBump</code> 會觸發 <code>eso</code><br>
+    &nbsp;・含 <code>*</code> 萬用字元（如 <code>eso*</code>）→ regex 比對任意英數延伸
   </div>
 
   <div style="margin-top: 20px;">
@@ -322,10 +325,17 @@ function parseIrc(line) {
 }
 
 function matchKeyword(message, keyword) {
-  if (/^[a-z0-9_]+$/i.test(keyword)) {
+  // 萬用字元：含 * 走 wildcard regex（eso* / *bump / *eso*）
+  if (keyword.includes('*')) {
+    const escaped = keyword.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[a-z0-9_]*');
+    return new RegExp(escaped, 'i').test(message);
+  }
+  // 單字英數（A、B、1）走 word boundary，避免 A 撞到 ABC
+  if (keyword.length === 1 && /^[a-z0-9_]$/i.test(keyword)) {
     const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp('(^|[^a-z0-9_])' + escaped + '($|[^a-z0-9_])', 'i').test(message);
   }
+  // 其他（含 eso, 親親幫）一律用包含比對
   return message.includes(keyword);
 }
 
