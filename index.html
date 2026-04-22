@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Twitch 派系投票</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Microsoft JhengHei', sans-serif;
+    background: #0e0e10;
+    color: #efeff1;
+    min-height: 100vh;
+  }
+  h1 { margin-top: 0; }
+  #setup { padding: 24px; max-width: 820px; margin: 0 auto; }
+  .field { margin: 12px 0; }
+  .field label { display: block; margin-bottom: 4px; font-size: 13px; opacity: 0.7; }
+  .field input {
+    width: 100%; padding: 10px 12px;
+    background: #1f1f23; border: 1px solid #3a3a3d; color: #efeff1;
+    border-radius: 4px; font-size: 14px;
+  }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .hint { font-size: 12px; opacity: 0.55; margin-top: -4px; margin-bottom: 8px; }
+  button {
+    background: #9147ff; color: white; border: 0; padding: 11px 20px;
+    border-radius: 4px; cursor: pointer; font-size: 15px; font-weight: bold;
+  }
+  button:hover { filter: brightness(1.1); }
+  button.danger { background: #c93028; }
+  button.ghost { background: #2a2a2e; }
+
+  #vote { display: none; }
+  #status {
+    padding: 14px 20px; background: #1f1f23; font-size: 16px;
+    border-bottom: 2px solid #2a2a2e; font-weight: bold;
+  }
+  #status.connected { color: #00f593; }
+  #status.error { color: #ff6b6b; }
+
+  #board {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 16px; padding: 20px;
+    height: calc(100vh - 420px);
+    min-height: 360px;
+  }
+  .faction {
+    background: #1f1f23; border-radius: 8px; padding: 18px;
+    display: flex; flex-direction: column; position: relative;
+    border-top: 6px solid var(--col);
+    transition: transform 0.2s;
+  }
+  .faction.leader { box-shadow: 0 0 30px var(--col); transform: translateY(-3px); }
+  .faction h2 {
+    margin: 0; font-size: 30px;
+    color: var(--col);
+  }
+  .faction .keyword {
+    font-size: 13px; opacity: 0.65; margin: 4px 0 8px;
+    font-family: Consolas, monospace;
+  }
+  .faction .count {
+    font-size: 72px; font-weight: 900; line-height: 1;
+    margin: 6px 0;
+  }
+  .faction .pct { font-size: 14px; opacity: 0.7; margin-bottom: 14px; }
+  .faction .voters {
+    flex: 1; overflow-y: auto; font-size: 13px;
+    background: #0e0e10; border-radius: 4px; padding: 8px;
+  }
+  .voter {
+    padding: 3px 6px; border-bottom: 1px solid #1a1a1d;
+    animation: drop 0.45s ease-out;
+  }
+  @keyframes drop {
+    from { transform: translateX(-12px); opacity: 0; background: var(--col); }
+    to { transform: translateX(0); opacity: 1; background: transparent; }
+  }
+  .leader-tag {
+    position: absolute; top: -14px; right: 14px;
+    background: var(--col); color: #000;
+    padding: 3px 10px; border-radius: 99px;
+    font-size: 11px; font-weight: bold; letter-spacing: 1px;
+  }
+  .controls { padding: 12px 20px; background: #1f1f23; border-top: 1px solid #2a2a2e; }
+  .controls button { margin-right: 8px; }
+  #meta { margin-left: 16px; opacity: 0.7; font-size: 13px; }
+
+  #feed {
+    padding: 12px 20px; background: #0a0a0c; font-size: 13px;
+    font-family: Consolas, monospace; height: 240px; overflow-y: auto;
+    border-top: 2px solid #9147ff;
+  }
+  #feed::before {
+    content: '聊天室即時 Feed（debug 用）';
+    display: block; font-size: 11px; opacity: 0.6;
+    margin-bottom: 6px; letter-spacing: 1px;
+  }
+  #feed .line { opacity: 0.7; padding: 2px 0; }
+  #feed .line.hit { opacity: 1; color: #00f593; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<div id="setup">
+  <h1>Twitch 派系投票測試</h1>
+  <div class="field">
+    <label>實況主頻道（小寫，不含 #）</label>
+    <input id="channel" placeholder="例如 kissmonster">
+    <div class="hint">不需要登入，匿名讀取公開聊天室</div>
+  </div>
+
+  <div class="row">
+    <div class="field"><label>A 派系名稱</label><input id="fA" value="親親幫"></div>
+    <div class="field"><label>A 派系關鍵詞</label><input id="kA" value="A"></div>
+  </div>
+  <div class="row">
+    <div class="field"><label>B 派系名稱</label><input id="fB" value="波貝貝"></div>
+    <div class="field"><label>B 派系關鍵詞</label><input id="kB" value="B"></div>
+  </div>
+  <div class="row">
+    <div class="field"><label>C 派系名稱</label><input id="fC" value="消證明"></div>
+    <div class="field"><label>C 派系關鍵詞</label><input id="kC" value="C"></div>
+  </div>
+
+  <div class="hint" style="margin-top:8px;">
+    規則：每個觀眾只能投一次，第一條符合任何關鍵詞的訊息決定派系。<br>
+    英文/數字關鍵詞會做 word-boundary 比對（"A" 不會被 "AKB" 觸發）；中文用包含比對。
+  </div>
+
+  <div style="margin-top: 20px;">
+    <button onclick="start()">開始投票</button>
+  </div>
+</div>
+
+<div id="vote">
+  <div id="status">未連線</div>
+  <div id="board"></div>
+  <div class="controls">
+    <button onclick="reset()">清空票數</button>
+    <button class="ghost" onclick="exportCSV()">匯出 CSV</button>
+    <button class="danger" onclick="stop()">結束投票</button>
+    <span id="meta"></span>
+  </div>
+  <div id="feed"></div>
+</div>
+
+<script>
+const COLORS = ['#ff4d6d', '#3da9fc', '#90e34d'];
+const factions = [];
+const userVotes = new Map();
+let ws = null;
+let startTs = 0;
+let totalChat = 0;
+let metaTimer = null;
+let currentChannel = '';
+
+function $(id) { return document.getElementById(id); }
+
+function start() {
+  const channel = $('channel').value.trim().toLowerCase();
+  if (!channel) { alert('請輸入頻道名稱'); return; }
+
+  factions.length = 0;
+  ['A', 'B', 'C'].forEach((k, i) => {
+    factions.push({
+      name: $('f' + k).value.trim() || k,
+      keyword: $('k' + k).value.trim(),
+      color: COLORS[i],
+      count: 0,
+      voters: []
+    });
+  });
+
+  if (factions.some(f => !f.keyword)) {
+    alert('每個派系都要有關鍵詞'); return;
+  }
+  const keywords = factions.map(f => f.keyword.toLowerCase());
+  if (new Set(keywords).size !== 3) {
+    alert('關鍵詞不可重複'); return;
+  }
+
+  $('setup').style.display = 'none';
+  $('vote').style.display = 'block';
+
+  renderBoard();
+
+  currentChannel = channel;
+  logFeed(`[1] start() 執行，目標頻道：${channel}`, true);
+  $('status').textContent = `連線中 #${channel} ...`;
+  $('status').className = '';
+
+  try {
+    ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
+  } catch (e) {
+    logFeed(`[FATAL] WebSocket 建立失敗：${e.message}`, false);
+    $('status').textContent = 'WebSocket 失敗'; $('status').className = 'error';
+    return;
+  }
+  logFeed('[2] WebSocket 物件已建立', true);
+
+  ws.onopen = () => {
+    logFeed('[3] WebSocket onopen 觸發', true);
+    const nick = 'justinfan' + Math.floor(Math.random() * 99999);
+    ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands');
+    ws.send('PASS SCHMOOPIIE');
+    ws.send('NICK ' + nick);
+    ws.send('JOIN #' + channel);
+    logFeed(`[4] 已送 JOIN #${channel}（暱稱 ${nick}）`, true);
+    $('status').textContent = `WebSocket 已連（等待 JOIN #${channel}...）`;
+    $('status').className = 'connected';
+  };
+
+  ws.onerror = (e) => {
+    logFeed(`[FATAL] WebSocket onerror`, false);
+    $('status').textContent = 'WebSocket 錯誤';
+    $('status').className = 'error';
+  };
+
+  ws.onclose = (e) => {
+    logFeed(`[ws closed] code=${e.code} reason=${e.reason || '(無)'}`, false);
+    $('status').textContent = `已斷線（code ${e.code}）`;
+    $('status').className = 'error';
+  };
+
+  ws.onmessage = (event) => {
+    const lines = event.data.split('\r\n').filter(l => l.length > 0);
+    for (const line of lines) handleIrcLine(line);
+  };
+
+  startTs = Date.now();
+  metaTimer = setInterval(updateMeta, 1000);
+}
+
+function handleIrcLine(line) {
+  if (line.startsWith('PING')) {
+    ws.send('PONG :tmi.twitch.tv');
+    return;
+  }
+
+  const parsed = parseIrc(line);
+  if (!parsed) return;
+
+  if (parsed.command === 'JOIN' && parsed.nick && parsed.nick.startsWith('justinfan')) {
+    $('status').textContent = `已加入 #${currentChannel}（聽 chat 中）`;
+    logFeed(`[joined #${parsed.params[0]?.replace(/^#/, '')}]`, true);
+    return;
+  }
+
+  if (parsed.command === 'NOTICE') {
+    logFeed(`[notice] ${parsed.trailing}`, false);
+    return;
+  }
+
+  if (parsed.command === '001') {
+    logFeed('[5] Twitch IRC 認證成功（welcome）', true);
+    return;
+  }
+
+  if (parsed.command !== 'PRIVMSG') return;
+
+  totalChat++;
+  const userId = parsed.tags['user-id'];
+  const display = parsed.tags['display-name'] || parsed.nick || 'anon';
+  const message = parsed.trailing || '';
+
+  if (!userId) {
+    logFeed(`${display}: ${message}`, false);
+    return;
+  }
+  if (userVotes.has(userId)) {
+    logFeed(`${display}: ${message}  (已投過)`, false);
+    return;
+  }
+
+  const lower = message.toLowerCase();
+  for (let i = 0; i < factions.length; i++) {
+    if (matchKeyword(lower, factions[i].keyword.toLowerCase())) {
+      userVotes.set(userId, i);
+      factions[i].count++;
+      factions[i].voters.unshift(display);
+      if (factions[i].voters.length > 200) factions[i].voters.pop();
+      renderBoard();
+      logFeed(`${display} -> ${factions[i].name}`, true);
+      return;
+    }
+  }
+  logFeed(`${display}: ${message}`, false);
+}
+
+function parseIrc(line) {
+  const out = { tags: {}, prefix: '', nick: '', command: '', params: [], trailing: '' };
+  let rest = line;
+
+  if (rest.startsWith('@')) {
+    const sp = rest.indexOf(' ');
+    const tagStr = rest.slice(1, sp);
+    rest = rest.slice(sp + 1);
+    tagStr.split(';').forEach(kv => {
+      const eq = kv.indexOf('=');
+      if (eq < 0) out.tags[kv] = true;
+      else out.tags[kv.slice(0, eq)] = kv.slice(eq + 1);
+    });
+  }
+  if (rest.startsWith(':')) {
+    const sp = rest.indexOf(' ');
+    out.prefix = rest.slice(1, sp);
+    const bang = out.prefix.indexOf('!');
+    out.nick = bang > 0 ? out.prefix.slice(0, bang) : '';
+    rest = rest.slice(sp + 1);
+  }
+  const trailingIdx = rest.indexOf(' :');
+  if (trailingIdx >= 0) {
+    out.trailing = rest.slice(trailingIdx + 2);
+    rest = rest.slice(0, trailingIdx);
+  }
+  const parts = rest.split(' ');
+  out.command = parts[0];
+  out.params = parts.slice(1);
+  return out;
+}
+
+function matchKeyword(message, keyword) {
+  if (/^[a-z0-9_]+$/i.test(keyword)) {
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp('(^|[^a-z0-9_])' + escaped + '($|[^a-z0-9_])', 'i').test(message);
+  }
+  return message.includes(keyword);
+}
+
+function renderBoard() {
+  const board = $('board');
+  const total = factions.reduce((s, f) => s + f.count, 0);
+  const max = Math.max(...factions.map(f => f.count));
+
+  board.innerHTML = factions.map(f => {
+    const pct = total > 0 ? (f.count / total * 100).toFixed(1) : '0.0';
+    const isLeader = max > 0 && f.count === max;
+    return `
+      <div class="faction ${isLeader ? 'leader' : ''}" style="--col: ${f.color}">
+        ${isLeader ? '<div class="leader-tag">LEADING</div>' : ''}
+        <h2>${esc(f.name)}</h2>
+        <div class="keyword">關鍵詞：${esc(f.keyword)}</div>
+        <div class="count">${f.count}</div>
+        <div class="pct">${pct}%</div>
+        <div class="voters">
+          ${f.voters.slice(0, 80).map(v => `<div class="voter">${esc(v)}</div>`).join('')}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+function updateMeta() {
+  const total = factions.reduce((s, f) => s + f.count, 0);
+  const elapsed = startTs ? Math.floor((Date.now() - startTs) / 1000) : 0;
+  const mm = Math.floor(elapsed / 60).toString().padStart(2, '0');
+  const ss = (elapsed % 60).toString().padStart(2, '0');
+  const rate = totalChat > 0 ? (total / totalChat * 100).toFixed(1) : '0.0';
+  $('meta').textContent = `總票數 ${total} / 聊天 ${totalChat} (${rate}%)　|　時間 ${mm}:${ss}`;
+}
+
+function logFeed(text, hit) {
+  const feed = $('feed');
+  const line = document.createElement('div');
+  line.className = 'line' + (hit ? ' hit' : '');
+  line.textContent = text;
+  feed.appendChild(line);
+  while (feed.childNodes.length > 30) feed.removeChild(feed.firstChild);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function reset() {
+  if (!confirm('清空所有票數，重新開始？')) return;
+  userVotes.clear();
+  factions.forEach(f => { f.count = 0; f.voters = []; });
+  totalChat = 0;
+  startTs = Date.now();
+  $('feed').innerHTML = '';
+  renderBoard();
+  logFeed('[reset]', true);
+}
+
+function exportCSV() {
+  const rows = [['faction', 'voter']];
+  factions.forEach(f => {
+    f.voters.forEach(v => rows.push([f.name, v]));
+  });
+  const csv = '﻿' + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `vote_${Date.now()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function stop() {
+  if (ws) { try { ws.close(); } catch(e) {} ws = null; }
+  if (metaTimer) { clearInterval(metaTimer); metaTimer = null; }
+  $('setup').style.display = 'block';
+  $('vote').style.display = 'none';
+}
+</script>
+</body>
+</html>
