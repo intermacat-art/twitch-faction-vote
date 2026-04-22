@@ -48,6 +48,21 @@
     border-radius: 4px; font-size: 14px;
   }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .faction-row {
+    display: grid; grid-template-columns: 16px 1fr 1fr 32px;
+    gap: 10px; align-items: end; margin: 8px 0;
+  }
+  .faction-row .swatch {
+    width: 12px; height: 38px; border-radius: 3px;
+    align-self: end; margin-bottom: 0;
+  }
+  .faction-row .remove-btn {
+    background: #2a2a2e; color: #efeff1; border: 1px solid #3a3a3d;
+    width: 32px; height: 38px; padding: 0; font-size: 18px; line-height: 1;
+    border-radius: 4px; cursor: pointer; align-self: end;
+  }
+  .faction-row .remove-btn:hover { background: #c93028; }
+  .faction-row .remove-btn:disabled { opacity: 0.3; cursor: not-allowed; }
   .hint { font-size: 12px; opacity: 0.55; margin-top: -4px; margin-bottom: 8px; }
   button {
     background: #9147ff; color: white; border: 0; padding: 11px 20px;
@@ -145,6 +160,13 @@
     margin-bottom: 30px; letter-spacing: 2px; }
   .podium { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 20px;
     max-width: 1200px; margin: 0 auto; align-items: end; }
+  .podium-rest { display: none; gap: 16px; max-width: 1200px;
+    margin: 30px auto 0; padding: 0 40px; }
+  .pod-rest { padding: 16px 14px; }
+  .pod-rest .rank-badge { font-size: 36px; }
+  .pod-rest .pod-name { font-size: 20px; }
+  .pod-rest .pod-count { font-size: 36px; }
+  .pod-rest .pod-voters { max-height: 100px; }
   .pod {
     border-radius: 12px; padding: 24px 18px; text-align: center;
     background: #1f1f23; border-top: 8px solid var(--col); position: relative;
@@ -200,17 +222,10 @@
     <div class="hint">不需要登入，匿名讀取公開聊天室</div>
   </div>
 
-  <div class="row">
-    <div class="field"><label>A 派系名稱</label><input id="fA" value="親親幫"></div>
-    <div class="field"><label>A 派系關鍵詞</label><input id="kA" value="A"></div>
-  </div>
-  <div class="row">
-    <div class="field"><label>B 派系名稱</label><input id="fB" value="波貝貝"></div>
-    <div class="field"><label>B 派系關鍵詞</label><input id="kB" value="B"></div>
-  </div>
-  <div class="row">
-    <div class="field"><label>C 派系名稱</label><input id="fC" value="消證明"></div>
-    <div class="field"><label>C 派系關鍵詞</label><input id="kC" value="C"></div>
+  <div id="factionRows"></div>
+  <div style="margin: 8px 0 4px;">
+    <button type="button" class="ghost" onclick="addFactionRow()" id="addBtn">+ 加派系</button>
+    <span style="opacity:0.6; font-size:13px; margin-left:12px;">最少 1 個、最多 5 個</span>
   </div>
 
   <div class="hint" style="margin-top:8px;">
@@ -242,6 +257,7 @@
   <h1>投票結果</h1>
   <div class="subtitle" id="resultsSubtitle"></div>
   <div class="podium" id="podium"></div>
+  <div class="podium-rest" id="podiumRest"></div>
   <div class="summary" id="resultsSummary"></div>
   <div class="actions">
     <button class="ghost" onclick="exportCSV()">匯出 CSV</button>
@@ -250,7 +266,16 @@
 </div>
 
 <script>
-const COLORS = ['#ff4d6d', '#3da9fc', '#90e34d'];
+const COLORS = ['#ff4d6d', '#3da9fc', '#90e34d', '#ffb84d', '#c77dff'];
+const DEFAULT_FACTIONS = [
+  { name: '親親幫', keyword: 'A' },
+  { name: '波貝貝', keyword: 'B' },
+  { name: '消證明', keyword: 'C' },
+  { name: '豬鼻醬', keyword: 'D' },
+  { name: '親親獸', keyword: 'E' }
+];
+const MAX_FACTIONS = 5;
+const MIN_FACTIONS = 1;
 const factions = [];
 const userVotes = new Map();
 let ws = null;
@@ -260,6 +285,61 @@ let metaTimer = null;
 let currentChannel = '';
 
 function $(id) { return document.getElementById(id); }
+
+function renderFactionRows() {
+  const container = $('factionRows');
+  container.innerHTML = '';
+  const rows = container._data || DEFAULT_FACTIONS.slice(0, 3).map(f => ({...f}));
+  container._data = rows;
+  rows.forEach((row, i) => {
+    const div = document.createElement('div');
+    div.className = 'faction-row';
+    div.innerHTML = `
+      <div class="swatch" style="background:${COLORS[i]}"></div>
+      <div class="field" style="margin:0;">
+        <label>派系 ${i + 1} 名稱</label>
+        <input class="f-name" data-i="${i}" value="${esc(row.name)}">
+      </div>
+      <div class="field" style="margin:0;">
+        <label>關鍵詞</label>
+        <input class="f-key" data-i="${i}" value="${esc(row.keyword)}">
+      </div>
+      <button type="button" class="remove-btn" onclick="removeFactionRow(${i})"
+        ${rows.length <= MIN_FACTIONS ? 'disabled' : ''} title="移除">×</button>
+    `;
+    container.appendChild(div);
+  });
+  container.querySelectorAll('.f-name').forEach(inp => {
+    inp.addEventListener('input', e => { rows[+e.target.dataset.i].name = e.target.value; });
+  });
+  container.querySelectorAll('.f-key').forEach(inp => {
+    inp.addEventListener('input', e => { rows[+e.target.dataset.i].keyword = e.target.value; });
+  });
+  $('addBtn').disabled = rows.length >= MAX_FACTIONS;
+}
+
+function addFactionRow() {
+  const rows = $('factionRows')._data;
+  if (rows.length >= MAX_FACTIONS) return;
+  const def = DEFAULT_FACTIONS[rows.length] || { name: `派系${rows.length + 1}`, keyword: '' };
+  rows.push({...def});
+  renderFactionRows();
+}
+
+function removeFactionRow(i) {
+  const rows = $('factionRows')._data;
+  if (rows.length <= MIN_FACTIONS) return;
+  rows.splice(i, 1);
+  renderFactionRows();
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+renderFactionRows();
 
 document.getElementById('bgPicker').addEventListener('click', e => {
   const btn = e.target.closest('button');
@@ -288,22 +368,24 @@ function start() {
   const channel = $('channel').value.trim().toLowerCase();
   if (!channel) { alert('請輸入頻道名稱'); return; }
 
+  const rows = $('factionRows')._data || [];
   factions.length = 0;
-  ['A', 'B', 'C'].forEach((k, i) => {
+  rows.forEach((r, i) => {
     factions.push({
-      name: $('f' + k).value.trim() || k,
-      keyword: $('k' + k).value.trim(),
+      name: (r.name || '').trim() || `派系${i + 1}`,
+      keyword: (r.keyword || '').trim(),
       color: COLORS[i],
       count: 0,
       voters: []
     });
   });
 
+  if (factions.length < MIN_FACTIONS) { alert('至少要有一個派系'); return; }
   if (factions.some(f => !f.keyword)) {
     alert('每個派系都要有關鍵詞'); return;
   }
   const keywords = factions.map(f => f.keyword.toLowerCase());
-  if (new Set(keywords).size !== 3) {
+  if (new Set(keywords).size !== keywords.length) {
     alert('關鍵詞不可重複'); return;
   }
 
@@ -471,6 +553,7 @@ function renderBoard() {
   const board = $('board');
   const total = factions.reduce((s, f) => s + f.count, 0);
   const max = Math.max(...factions.map(f => f.count));
+  board.style.gridTemplateColumns = `repeat(${factions.length}, 1fr)`;
 
   board.innerHTML = factions.map((f, idx) => {
     const pct = total > 0 ? (f.count / total * 100).toFixed(1) : '0.0';
@@ -495,12 +578,6 @@ function renderBoard() {
 function toggleCollapse(i) {
   factions[i].collapsed = !factions[i].collapsed;
   renderBoard();
-}
-
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, c => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
 }
 
 function updateMeta() {
@@ -569,16 +646,21 @@ function showResults() {
 
   $('resultsSubtitle').textContent = `#${currentChannel}　|　投票時間 ${mm}:${ss}`;
 
-  const RANK_LABELS = ['1st', '2nd', '3rd'];
-  const RANK_TAGS = ['CHAMPION', 'RUNNER-UP', '3RD'];
-  const RANK_ORDER = [1, 0, 2]; // 顯示順序：第二、第一、第三（讓第一在中間）
+  const RANK_LABELS = ['1st', '2nd', '3rd', '4th', '5th'];
+  const RANK_TAGS = ['CHAMPION', 'RUNNER-UP', '3RD', '4TH', '5TH'];
 
-  $('podium').innerHTML = RANK_ORDER.map((rankIdx) => {
+  // 顯示順序：N=1 → [0]; N=2 → [0,1]; N≥3 頂台 [1,0,2]，4/5 排在後面
+  let topOrder, restOrder;
+  if (ranked.length === 1) { topOrder = [0]; restOrder = []; }
+  else if (ranked.length === 2) { topOrder = [0, 1]; restOrder = []; }
+  else { topOrder = [1, 0, 2]; restOrder = ranked.slice(3).map((_, k) => 3 + k); }
+
+  const podHtml = (rankIdx, isTop) => {
     const f = ranked[rankIdx];
     if (!f) return '';
     const pct = total > 0 ? (f.count / total * 100).toFixed(1) : '0.0';
     return `
-      <div class="pod pod-${rankIdx + 1}" style="--col: ${f.color}">
+      <div class="pod pod-${rankIdx + 1} ${!isTop ? 'pod-rest' : ''}" style="--col: ${f.color}">
         ${rankIdx === 0 ? `<div class="winner-tag">${RANK_TAGS[rankIdx]}</div>` : ''}
         <div class="rank-badge">${RANK_LABELS[rankIdx]}</div>
         <div class="pod-name">${esc(f.name)}</div>
@@ -591,7 +673,25 @@ function showResults() {
         </div>
       </div>
     `;
-  }).join('');
+  };
+
+  const podium = $('podium');
+  // 頂台 grid 欄數依 ranked.length 而定（最多 3 欄）
+  const topCols = topOrder.length === 1 ? '1fr' :
+                  topOrder.length === 2 ? '1fr 1fr' : '1fr 1.3fr 1fr';
+  podium.style.gridTemplateColumns = topCols;
+  podium.innerHTML = topOrder.map(i => podHtml(i, true)).join('');
+
+  // 4、5 名排在頒獎台下方
+  const restEl = $('podiumRest');
+  if (restOrder.length > 0) {
+    restEl.style.display = 'grid';
+    restEl.style.gridTemplateColumns = `repeat(${restOrder.length}, 1fr)`;
+    restEl.innerHTML = restOrder.map(i => podHtml(i, false)).join('');
+  } else {
+    restEl.style.display = 'none';
+    restEl.innerHTML = '';
+  }
 
   $('resultsSummary').textContent = `總票數 ${total}　|　聊天訊息 ${totalChat}　|　參與率 ${totalChat > 0 ? (total/totalChat*100).toFixed(1) : 0}%`;
 }
